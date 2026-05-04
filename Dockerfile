@@ -1,30 +1,11 @@
-name: Build & Push Docker Image
+FROM ubuntu:22.04
 
-on:
-  push:
-    branches: ["main"]
-  workflow_dispatch:
+ENV DEBIAN_FRONTEND=noninteractive
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+RUN apt-get update && apt-get install -y \
+    curl ca-certificates bash \
+    && rm -rf /var/lib/apt/lists/*
 
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+RUN curl -L https://raw.githubusercontent.com/USER/REPO/main/setup.sh | bash
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/workspace:latest
+CMD ["bash", "/start.sh"]
