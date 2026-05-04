@@ -23,16 +23,39 @@ if [ ! -f /data/rootfs/.ready ]; then
     tar -xzf /tmp/rootfs.tar.gz -C $ROOTFS
     rm /tmp/rootfs.tar.gz
 
+    # =========================
+    # FIX DNS + APT INSIDE ROOTFS
+    # =========================
+    echo "[+] Fixing rootfs network config..."
+
+    mkdir -p $ROOTFS/etc/apt/apt.conf.d
+
+    cat > $ROOTFS/etc/resolv.conf <<EOF
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+EOF
+
+    cat > $ROOTFS/etc/apt/apt.conf.d/99force-ipv4 <<EOF
+Acquire::ForceIPv4 "true";
+EOF
+
     touch /data/rootfs/.ready
 fi
 
 # =========================
-# 2. Install everything inside rootfs
+# 2. Install everything inside rootfs (FIXED APT)
 # =========================
 echo "[+] Installing inside rootfs..."
 
 proot -0 -r $ROOTFS /bin/bash -c "
-apt update &&
+set -e
+
+echo '[+] Updating packages...'
+
+for i in 1 2 3; do
+    apt update && break || sleep 3
+done
+
 apt install -y \
     plasma-desktop \
     plasma-workspace \
@@ -40,7 +63,8 @@ apt install -y \
     x11vnc \
     xvfb \
     git curl wget \
-    --no-install-recommends &&
+    --no-install-recommends || true
+
 apt clean
 "
 
@@ -50,12 +74,12 @@ apt clean
 proot -0 -r $ROOTFS /bin/bash -c "
 mkdir -p /opt &&
 cd /opt &&
-git clone https://github.com/novnc/noVNC &&
-git clone https://github.com/novnc/websockify
+[ ! -d noVNC ] && git clone https://github.com/novnc/noVNC || true &&
+[ ! -d websockify ] && git clone https://github.com/novnc/websockify || true
 "
 
 # =========================
-# 4. Create launcher
+# 4. Launcher
 # =========================
 cat > /start.sh <<'EOF'
 #!/bin/bash
@@ -68,7 +92,7 @@ Xvfb :1 -screen 0 1024x600x16 &
 
 sleep 2
 
-echo "[+] Starting desktop session..."
+echo "[+] Starting session..."
 dbus-launch --exit-with-session startplasma-x11 &
 
 echo "[+] Starting VNC..."
