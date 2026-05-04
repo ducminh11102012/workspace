@@ -6,6 +6,6 @@ RUN apt-get update && apt-get install -y \
     curl ca-certificates bash \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -L https://raw.githubusercontent.com/USER/REPO/main/setup.sh | bash
+RUN curl -L https://github.com/ducminh11102012/workspace/raw/refs/heads/main/setup.sh | bash
 
 CMD ["bash", "/start.sh"]
