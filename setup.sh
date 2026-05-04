@@ -8,27 +8,22 @@ apt-get update && apt-get install -y \
     proot wget curl git tar xz-utils \
     || true
 
+# =========================
+# 0. HOST - INSTALL noVNC VIA APT
+# =========================
+echo "[+] Installing noVNC (APT)..."
+
+apt-get update && apt-get install -y \
+    novnc \
+    websockify \
+    || true
+
+# =========================
+# 1. ROOTFS
+# =========================
 ROOTFS=/data/rootfs
 mkdir -p $ROOTFS
 
-# =========================
-# 0. CLONE NOVNC EARLY (HOST LAYER)
-# =========================
-echo "[+] Preparing HOST tools (noVNC)..."
-
-mkdir -p /opt
-
-if [ ! -d /opt/noVNC ]; then
-    git clone https://github.com/novnc/noVNC /opt/noVNC
-fi
-
-if [ ! -d /opt/websockify ]; then
-    git clone https://github.com/novnc/websockify /opt/websockify
-fi
-
-# =========================
-# 1. DOWNLOAD ROOTFS
-# =========================
 if [ ! -f /data/rootfs/.ready ]; then
     echo "[+] Downloading Ubuntu rootfs..."
 
@@ -38,7 +33,7 @@ if [ ! -f /data/rootfs/.ready ]; then
     tar -xzf /tmp/rootfs.tar.gz -C $ROOTFS
     rm /tmp/rootfs.tar.gz
 
-    echo "[+] Fixing network inside rootfs..."
+    echo "[+] Fixing network..."
 
     mkdir -p $ROOTFS/etc/apt/apt.conf.d
 
@@ -55,28 +50,32 @@ EOF
 fi
 
 # =========================
-# 2. INSTALL DESKTOP IN ROOTFS
+# 2. INSTALL XFCE + VNC
 # =========================
-echo "[+] Installing desktop inside rootfs..."
+echo "[+] Installing XFCE inside ROOTFS..."
 
 proot -0 -r $ROOTFS /bin/bash -c "
 set -e
 
+dpkg --configure -a || true
+apt -f install -y || true
+
 apt update
 
 apt install -y \
-    plasma-desktop \
-    dbus-x11 \
+    xfce4 \
+    xfce4-goodies \
     x11vnc \
     xvfb \
-    git curl wget \
+    dbus-x11 \
+    git curl wget sudo \
     --no-install-recommends
 
 apt clean
 "
 
 # =========================
-# 3. START SCRIPT (HOST)
+# 3. START SCRIPT
 # =========================
 cat > /start.sh <<'EOF'
 #!/bin/bash
@@ -86,32 +85,33 @@ set -e
 ROOTFS=/data/rootfs
 export DISPLAY=:1
 
-echo "[+] Booting desktop inside ROOTFS..."
+echo "[+] Starting XFCE inside ROOTFS..."
 
 proot -0 -r $ROOTFS /bin/bash -c "
 export DISPLAY=:1
 
-echo '[+] Starting Xvfb...'
 Xvfb :1 -screen 0 1024x600x16 &
-
 sleep 2
 
-echo '[+] Starting KDE session...'
-dbus-launch --exit-with-session startplasma-x11 &
+startxfce4 &
+sleep 2
 
-echo '[+] Starting VNC server...'
 x11vnc -display :1 -forever -nopw -rfbport 5900 &
-
-echo '[+] Desktop running inside ROOTFS'
 "
 
 sleep 3
 
-echo "[+] Starting noVNC on HOST..."
+echo "[+] Starting noVNC (APT version)..."
 
-cd /opt/noVNC
+# Debian/Ubuntu path
+NOVNC=/usr/share/novnc/utils/novnc_proxy
 
-./utils/novnc_proxy \
+if [ ! -f $NOVNC ]; then
+    echo "[!] noVNC not found via apt"
+    exit 1
+fi
+
+$NOVNC \
     --vnc localhost:5900 \
     --listen 7860
 
