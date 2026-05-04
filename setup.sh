@@ -2,13 +2,22 @@
 
 set -e
 
+echo "[+] Installing base tools..."
+
+apt-get update && apt-get install -y \
+    proot wget curl git tar xz-utils \
+    || true
+
 ROOTFS=/data/rootfs
 mkdir -p $ROOTFS
 
-echo "[+] Downloading system image..."
-
+# =========================
+# 1. Download rootfs
+# =========================
 if [ ! -f /data/rootfs/.ready ]; then
-    wget -O /tmp/rootfs.tar.gz \
+    echo "[+] Downloading Ubuntu rootfs..."
+
+    curl -L -o /tmp/rootfs.tar.gz \
     https://partner-images.canonical.com/core/jammy/current/ubuntu-jammy-core-cloudimg-amd64-root.tar.gz
 
     tar -xzf /tmp/rootfs.tar.gz -C $ROOTFS
@@ -17,6 +26,9 @@ if [ ! -f /data/rootfs/.ready ]; then
     touch /data/rootfs/.ready
 fi
 
+# =========================
+# 2. Install everything inside rootfs
+# =========================
 echo "[+] Installing inside rootfs..."
 
 proot -0 -r $ROOTFS /bin/bash -c "
@@ -27,28 +39,48 @@ apt install -y \
     dbus-x11 \
     x11vnc \
     xvfb \
+    git curl wget \
     --no-install-recommends &&
 apt clean
 "
 
-echo "[+] Creating runtime start script..."
+# =========================
+# 3. Install noVNC inside rootfs
+# =========================
+proot -0 -r $ROOTFS /bin/bash -c "
+mkdir -p /opt &&
+cd /opt &&
+git clone https://github.com/novnc/noVNC &&
+git clone https://github.com/novnc/websockify
+"
 
-cat > /data/start.sh <<'EOF'
+# =========================
+# 4. Create launcher
+# =========================
+cat > /start.sh <<'EOF'
 #!/bin/bash
 
 export DISPLAY=:1
 export KDE_NO_COMPOSITING=1
 
+echo "[+] Starting Xvfb..."
 Xvfb :1 -screen 0 1024x600x16 &
+
 sleep 2
 
+echo "[+] Starting desktop session..."
 dbus-launch --exit-with-session startplasma-x11 &
 
+echo "[+] Starting VNC..."
 x11vnc -display :1 -forever -nopw -rfbport 5900 &
+
+echo "[+] Starting noVNC..."
+cd /opt/noVNC
+./utils/novnc_proxy --vnc localhost:5900 --listen 7860
 
 wait
 EOF
 
-chmod +x /data/start.sh
+chmod +x /start.sh
 
 echo "[+] Setup complete"
