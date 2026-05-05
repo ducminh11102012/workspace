@@ -49,17 +49,17 @@ echo "[*] Waiting for VNC server to be ready..."\n\
 sleep 6\n\
 \n\
 echo "[*] Spawning noVNC on port 7860..."\n\
-websockify --web=/usr/share/novnc 7860 localhost:5900 &\n\
+websockify --web=/usr/share/novnc 7860 localhost:5901 &\n\
 \n\
 echo "========================================"\n\
 echo " Desktop ready!"\n\
 echo " -> http://localhost:7860/vnc.html"\n\
-echo " -> VNC port: 5900  |  password: password"\n\
+echo " -> VNC port: 5901  |  password: password"\n\
 echo "========================================"\n\
 \n\
 wait\n\
 ' > /entrypoint.sh && chmod +x /entrypoint.sh
 
-EXPOSE 5900 7860
+EXPOSE 5901 7860
 
 ENTRYPOINT ["/entrypoint.sh"]
