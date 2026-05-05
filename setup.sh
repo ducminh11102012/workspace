@@ -2,28 +2,19 @@
 
 set -e
 
-echo "[+] Installing base tools..."
+echo "[+] Base install..."
 
 apt-get update && apt-get install -y \
     proot wget curl git tar xz-utils \
+    novnc websockify \
     || true
 
-# =========================
-# 0. HOST - INSTALL noVNC VIA APT
-# =========================
-echo "[+] Installing noVNC (APT)..."
-
-apt-get update && apt-get install -y \
-    novnc \
-    websockify \
-    || true
-
-# =========================
-# 1. ROOTFS
-# =========================
 ROOTFS=/data/rootfs
 mkdir -p $ROOTFS
 
+# =========================
+# ROOTFS DOWNLOAD
+# =========================
 if [ ! -f /data/rootfs/.ready ]; then
     echo "[+] Downloading Ubuntu rootfs..."
 
@@ -32,8 +23,6 @@ if [ ! -f /data/rootfs/.ready ]; then
 
     tar -xzf /tmp/rootfs.tar.gz -C $ROOTFS
     rm /tmp/rootfs.tar.gz
-
-    echo "[+] Fixing network..."
 
     mkdir -p $ROOTFS/etc/apt/apt.conf.d
 
@@ -50,32 +39,39 @@ EOF
 fi
 
 # =========================
-# 2. INSTALL XFCE + VNC
+# INSTALL XFCE (SAFE CORE + DBUS FIX)
 # =========================
-echo "[+] Installing XFCE inside ROOTFS..."
+echo "[+] Installing XFCE core + DBUS..."
 
 proot -0 -r $ROOTFS /bin/bash -c "
 set -e
 
+export DEBIAN_FRONTEND=noninteractive
+
+# FIX dpkg state trước
 dpkg --configure -a || true
 apt -f install -y || true
 
 apt update
 
 apt install -y \
-    xfce4 \
-    xfce4-goodies \
+    xfce4-session \
+    xfce4-panel \
+    xfce4-settings \
+    xfwm4 \
+    xfdesktop4 \
+    thunar \
+    dbus \
+    dbus-x11 \
     x11vnc \
     xvfb \
-    dbus-x11 \
-    git curl wget sudo \
     --no-install-recommends
 
 apt clean
 "
 
 # =========================
-# 3. START SCRIPT
+# START SCRIPT
 # =========================
 cat > /start.sh <<'EOF'
 #!/bin/bash
@@ -85,31 +81,36 @@ set -e
 ROOTFS=/data/rootfs
 export DISPLAY=:1
 
-echo "[+] Starting XFCE inside ROOTFS..."
+echo "[+] Starting XFCE + DBUS fixed stack..."
 
 proot -0 -r $ROOTFS /bin/bash -c "
+set -e
+
 export DISPLAY=:1
 
-Xvfb :1 -screen 0 1024x600x16 &
+# ===== DBUS FIX (IMPORTANT) =====
+eval \$(dbus-launch --sh-syntax)
+
+# ===== X SERVER =====
+Xvfb :1 -screen 0 1280x720x16 &
 sleep 2
 
-startxfce4 &
+# ===== XFCE CORE =====
+xfwm4 &
+xfdesktop &
+xfce4-panel &
+
 sleep 2
 
+# ===== VNC =====
 x11vnc -display :1 -forever -nopw -rfbport 5900 &
 "
 
 sleep 3
 
-echo "[+] Starting noVNC (APT version)..."
+echo "[+] Starting noVNC (APT)..."
 
-# Debian/Ubuntu path
 NOVNC=/usr/share/novnc/utils/novnc_proxy
-
-if [ ! -f $NOVNC ]; then
-    echo "[!] noVNC not found via apt"
-    exit 1
-fi
 
 $NOVNC \
     --vnc localhost:5900 \
@@ -120,5 +121,5 @@ EOF
 
 chmod +x /start.sh
 
-echo "[+] Setup complete"
+echo "[+] DONE"
 echo "[+] Run: bash /start.sh"
