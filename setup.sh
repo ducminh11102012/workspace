@@ -1,125 +1,59 @@
-#!/bin/bash
+# syntax=docker/dockerfile:1
+FROM ubuntu:22.04
 
-set -e
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Ho_Chi_Minh
 
-echo "[+] Base install..."
+# ── 1. Dependencies ───────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y \
+    git \
+    wget \
+    curl \
+    bash \
+    tzdata \
+    procps \
+    novnc \
+    websockify \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
 
-apt-get update && apt-get install -y \
-    proot wget curl git tar xz-utils \
-    novnc websockify \
-    || true
+# ── 2. Clone freeroot vào /data ───────────────────────────────────────────────
+RUN mkdir -p /data && \
+    git clone https://github.com/foxytouxxx/freeroot.git /data/freeroot
 
-ROOTFS=/data/rootfs
-mkdir -p $ROOTFS
+# ── 3. Cài XFCE + VNC bên trong proot lúc build ──────────────────────────────
+RUN printf '#!/bin/bash\n\
+export DEBIAN_FRONTEND=noninteractive\n\
+apt-get update -y\n\
+apt-get install -y xfce4 xfce4-goodies xfce4-terminal dbus-x11 tigervnc-standalone-server tigervnc-common\n\
+apt-get clean\n\
+rm -rf /var/lib/apt/lists/*\n\
+mkdir -p ~/.vnc\n\
+printf "password\\npassword\\nn\\n" | vncpasswd\n\
+printf "#!/bin/bash\\nunset SESSION_MANAGER\\nunset DBUS_SESSION_BUS_ADDRESS\\nexec startxfce4\\n" > ~/.vnc/xstartup\n\
+chmod +x ~/.vnc/xstartup\n\
+' > /data/bootstrap.sh && chmod +x /data/bootstrap.sh
 
-# =========================
-# ROOTFS DOWNLOAD
-# =========================
-if [ ! -f /data/rootfs/.ready ]; then
-    echo "[+] Downloading Ubuntu rootfs..."
+RUN cd /data/freeroot && HOME=/data bash noninteractive.sh < /data/bootstrap.sh
 
-    curl -L -o /tmp/rootfs.tar.gz \
-    https://partner-images.canonical.com/core/jammy/current/ubuntu-jammy-core-cloudimg-amd64-root.tar.gz
+# ── 4. Entrypoint ─────────────────────────────────────────────────────────────
+RUN printf '#!/bin/bash\n\
+set -e\n\
+\n\
+# Start desktop service\n\
+echo "vncserver :1 -rfbport 1538 -geometry 1280x720 -depth 24 -localhost no && tail -f /dev/null" \\\n\
+    | (cd /data/freeroot && HOME=/data bash noninteractive.sh) > /dev/null 2>&1 &\n\
+\n\
+sleep 6\n\
+\n\
+# Start web service\n\
+websockify --web=/usr/share/novnc 7860 localhost:1538 > /dev/null 2>&1 &\n\
+\n\
+echo "Done!"\n\
+\n\
+wait\n\
+' > /entrypoint.sh && chmod +x /entrypoint.sh
 
-    tar -xzf /tmp/rootfs.tar.gz -C $ROOTFS
-    rm /tmp/rootfs.tar.gz
+EXPOSE 7860
 
-    mkdir -p $ROOTFS/etc/apt/apt.conf.d
-
-    cat > $ROOTFS/etc/resolv.conf <<EOF
-nameserver 8.8.8.8
-nameserver 1.1.1.1
-EOF
-
-    cat > $ROOTFS/etc/apt/apt.conf.d/99force-ipv4 <<EOF
-Acquire::ForceIPv4 "true";
-EOF
-
-    touch /data/rootfs/.ready
-fi
-
-# =========================
-# INSTALL XFCE (SAFE CORE + DBUS FIX)
-# =========================
-echo "[+] Installing XFCE core + DBUS..."
-
-proot -0 -r $ROOTFS /bin/bash -c "
-set -e
-
-export DEBIAN_FRONTEND=noninteractive
-
-# FIX dpkg state trước
-dpkg --configure -a || true
-apt -f install -y || true
-
-apt update
-
-apt install -y \
-    xfce4-session \
-    xfce4-panel \
-    xfce4-settings \
-    xfwm4 \
-    xfdesktop4 \
-    thunar \
-    dbus \
-    dbus-x11 \
-    x11vnc \
-    xvfb \
-    --no-install-recommends
-
-apt clean
-"
-
-# =========================
-# START SCRIPT
-# =========================
-cat > /start.sh <<'EOF'
-#!/bin/bash
-
-set -e
-
-ROOTFS=/data/rootfs
-export DISPLAY=:1
-
-echo "[+] Starting XFCE + DBUS fixed stack..."
-
-proot -0 -r $ROOTFS /bin/bash -c "
-set -e
-
-export DISPLAY=:1
-
-# ===== DBUS FIX (IMPORTANT) =====
-eval \$(dbus-launch --sh-syntax)
-
-# ===== X SERVER =====
-Xvfb :1 -screen 0 1280x720x16 &
-sleep 2
-
-# ===== XFCE CORE =====
-xfwm4 &
-xfdesktop &
-xfce4-panel &
-
-sleep 2
-
-# ===== VNC =====
-x11vnc -display :1 -forever -nopw -rfbport 5900 &
-"
-
-sleep 3
-
-echo "[+] Starting noVNC (APT)..."
-
-NOVNC=/usr/share/novnc/utils/novnc_proxy
-
-$NOVNC \
-    --vnc localhost:5900 \
-    --listen 7860
-
-wait
-EOF
-
-chmod +x /start.sh
-
-echo "[+] DONE"
-echo "[+] Run: bash /start.sh"
+ENTRYPOINT ["/entrypoint.sh"]
